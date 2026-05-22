@@ -18,6 +18,7 @@
     "lint-fix": "eslint . --fix",
     "test": "npm install --no-save \"gl@^6.0.2\" && npm run lint && jest",
     "jest": "jest",
+    "prepare": "npm run build:apps",
     "clean": "node ./scripts/clean.js --all",
     "clean:build": "node ./scripts/clean.js --build",
     "build": "npm run build:apps && npm run build:lib",
