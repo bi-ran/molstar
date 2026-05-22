@@ -25,6 +25,7 @@ import { PluginConfig } from '../../mol-plugin/config';
 import { PluginContext } from '../../mol-plugin/context';
 import { compileIdListSelection } from '../../mol-script/util/id-list';
 import { StateObjectCell, StateObjectRef } from '../../mol-state';
+import { Color } from '../../mol-util/color';
 import { memoizeLatest } from '../../mol-util/memoize';
 import { ParamDefinition } from '../../mol-util/param-definition';
 import { capitalize, stripTags } from '../../mol-util/string';
@@ -375,6 +376,7 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
                 </div>}
                 {this.state.action === 'theme' && <div className='msp-selection-viewport-controls-actions'>
                     <ControlGroup header='Theme' title='Click to close.' initialExpanded={true} hideExpander={true} hideOffset={true} onHeaderClick={this.toggleTheme} topRightIcon={CloseSvg}>
+                        <QuickColorSwatchesControls onApply={this.toggleTheme} />
                         <ApplyThemeControls onApply={this.toggleTheme} />
                     </ControlGroup>
                 </div>}
@@ -506,6 +508,65 @@ interface ApplyThemeControlsState {
 
 interface ApplyThemeControlsProps {
     onApply?: () => void
+}
+
+const SelectionQuickColors: [string, Color][] = [
+    ['Maroon', Color(0x800000)],
+    ['Red', Color(0xe6194b)],
+    ['Pink', Color(0xfabebe)],
+    ['Magenta', Color(0xf032e6)],
+    ['Purple', Color(0x911eb4)],
+    ['Lavender', Color(0xe6beff)],
+    ['Navy', Color(0x000075)],
+    ['Blue', Color(0x4363d8)],
+    ['Cyan', Color(0x46f0f0)],
+    ['Teal', Color(0x008080)],
+    ['Mint', Color(0xaaffc3)],
+    ['Green', Color(0x3cb44b)],
+    ['Lime', Color(0xbcf60c)],
+    ['Olive', Color(0x808000)],
+    ['Yellow', Color(0xffe119)],
+    ['Cream', Color(0xfffac8)],
+    ['Apricot', Color(0xffd8b1)],
+    ['Orange', Color(0xf58231)],
+    ['Brown', Color(0x9a6324)],
+    ['White', Color(0xffffff)],
+    ['Gray', Color(0x808080)],
+    ['Black', Color(0x000000)],
+];
+
+const QuickColorSwatchStyle: React.CSSProperties = {
+    flex: '0 0 24px',
+    minWidth: '24px',
+    height: '24px',
+    padding: 0,
+    border: '1px solid rgba(0, 0, 0, 0.25)'
+};
+
+function quickColorSwatchStyle(color: Color): React.CSSProperties {
+    return { ...QuickColorSwatchStyle, background: Color.toStyle(color) };
+}
+
+class QuickColorSwatchesControls extends PurePluginUIComponent<ApplyThemeControlsProps, ApplyThemeControlsState> {
+    _params = memoizeLatest((pivot: StructureRef | undefined) => StructureComponentManager.getThemeParams(this.plugin, pivot));
+    get params() { return this._params(this.plugin.managers.structure.component.pivotStructure); }
+
+    state = { values: ParamDefinition.getDefaultValues(this.params) };
+
+    applyQuickColor = (color: Color) => {
+        const values = {
+            ...this.state.values,
+            action: { name: 'color' as const, params: { color } }
+        };
+        this.plugin.managers.structure.component.applyTheme(values, this.plugin.managers.structure.hierarchy.current.structures);
+        this.props.onApply?.();
+    };
+
+    render() {
+        return <div className='msp-flex-row' style={{ flexWrap: 'wrap', justifyContent: 'center', background: 'none', marginBottom: '1px' }}>
+            {SelectionQuickColors.map(([label, color]) => <Button key={label} title={`Apply ${label}`} onClick={() => this.applyQuickColor(color)} style={quickColorSwatchStyle(color)} />)}
+        </div>;
+    }
 }
 
 class ApplyThemeControls extends PurePluginUIComponent<ApplyThemeControlsProps, ApplyThemeControlsState> {

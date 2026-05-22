@@ -130,10 +130,12 @@ export namespace ParamDefinition {
     export interface Color extends Base<ColorData> {
         type: 'color'
         isExpanded?: boolean
+        hidePresets?: boolean
     }
-    export function Color(defaultValue: ColorData, info?: Info & { isExpanded?: boolean }): Color {
+    export function Color(defaultValue: ColorData, info?: Info & { isExpanded?: boolean, hidePresets?: boolean }): Color {
         const ret = setInfo<Color>({ type: 'color', defaultValue }, info);
         if (info?.isExpanded) ret.isExpanded = info.isExpanded;
+        if (info?.hidePresets) ret.hidePresets = info.hidePresets;
         return ret;
     }
 

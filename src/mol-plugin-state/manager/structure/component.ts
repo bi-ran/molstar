@@ -526,7 +526,7 @@ namespace StructureComponentManager {
             selection: PD.Select(options[1][0], options, { isHidden: false }),
             action: PD.MappedStatic('color', {
                 color: PD.Group({
-                    color: PD.Color(ColorNames.blue, { isExpanded: true }),
+                    color: PD.Color(ColorNames.blue, { isExpanded: true, hidePresets: true }),
                 }, { isFlat: true }),
                 resetColor: PD.EmptyGroup({ label: 'Reset Color' }),
                 transparency: PD.Group({

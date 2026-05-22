@@ -74,22 +74,26 @@ export class CombinedColorControl extends React.PureComponent<ParamProps<PD.Colo
         </div>;
     }
 
+    lightnessControls() {
+        return <div style={{ display: 'flex', textAlignLast: 'center' }}>
+            <Button onClick={this.onLighten} style={{ order: 1, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control'>Lighten</Button>
+            <Button onClick={this.onDarken} style={{ order: 1, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control'>Darken</Button>
+        </div>;
+    }
+
     render() {
         const label = this.props.param.label || camelCaseToWords(this.props.name);
         const [r, g, b] = Color.toRgb(this.props.value);
 
         const inner = <>
-            {this.swatch()}
+            {!this.props.param.hidePresets && this.swatch()}
             <ControlRow label='RGB' className='msp-control-label-short' control={<div style={{ display: 'flex', textAlignLast: 'center', left: '80px' }}>
                 <TextInput onChange={this.onR} numeric value={r} delayMs={250} style={{ order: 1, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control' onEnter={this.props.onEnter} blurOnEnter={true} blurOnEscape={true} />
                 <TextInput onChange={this.onG} numeric value={g} delayMs={250} style={{ order: 2, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control' onEnter={this.props.onEnter} blurOnEnter={true} blurOnEscape={true} />
                 <TextInput onChange={this.onB} numeric value={b} delayMs={250} style={{ order: 3, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control' onEnter={this.props.onEnter} blurOnEnter={true} blurOnEscape={true} />
                 <input onInput={this.onRGB} type='color' value={Color.toHexStyle(this.props.value)} style={{ order: 4, flex: '1 1 auto', minWidth: '32px', width: '32px', height: '32px', padding: '0 2px 0 2px', background: 'none', border: 'none', cursor: 'pointer' }}></input>
             </div>} />
-            <div style={{ display: 'flex', textAlignLast: 'center' }}>
-                <Button onClick={this.onLighten} style={{ order: 1, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control'>Lighten</Button>
-                <Button onClick={this.onDarken} style={{ order: 1, flex: '1 1 auto', minWidth: 0 }} className='msp-form-control'>Darken</Button>
-            </div>
+            {!this.props.param.hidePresets && this.lightnessControls()}
         </>;
 
         if (this.props.hideNameRow) {
