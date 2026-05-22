@@ -21,7 +21,8 @@ import { State, StateSelection } from '../mol-state';
 import { ChainSequenceWrapper } from './sequence/chain';
 import { ElementSequenceWrapper } from './sequence/element';
 import { elementLabel } from '../mol-theme/label';
-import { Icon, HelpOutlineSvg } from './controls/icons';
+import { CopySvg, Icon, HelpOutlineSvg } from './controls/icons';
+import { IconButton } from './controls/common';
 import { StructureSelectionManager } from '../mol-plugin-state/manager/structure/selection';
 import { arrayEqual } from '../mol-util/array';
 
@@ -374,6 +375,42 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
         this.setState(state);
     };
 
+    private copySelected = async (sequenceWrappers: { wrapper: string | SequenceWrapper.Any, label: string }[]) => {
+        const selected: string[] = [];
+        for (const s of sequenceWrappers) {
+            if (typeof s.wrapper === 'string') continue;
+            const residues: string[] = [];
+            for (let i = 0, il = s.wrapper.length; i < il; ++i) {
+                if (s.wrapper.isSelected(i)) residues.push(s.wrapper.residueLabel(i));
+            }
+            if (residues.length > 0) selected.push(residues.join(''));
+        }
+
+        if (selected.length === 0) {
+            this.plugin.log.warn('No selected residues in the visible sequence.');
+            return;
+        }
+
+        const text = selected.join('\n');
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+            }
+            this.plugin.log.info(`Copied ${selected.length === 1 ? 'sequence' : `${selected.length} sequences`} to clipboard.`);
+        } catch {
+            this.plugin.log.error('Failed to copy selected sequence to clipboard.');
+        }
+    };
+
     render() {
         if (this.getStructure(this.state.structureRef) === Structure.Empty) {
             return <div className='msp-sequence'>
@@ -403,6 +440,7 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
                 {params.operator.options.length > 1 && <>
                     <PureSelectControl title={`[Instance] ${PD.optionLabel(params.operator, values.operator)}`} param={params.operator} name='operator' value={values.operator} onChange={this.setParamProps} />
                 </>}
+                <IconButton svg={CopySvg} transparent title='Copy selected residues from the visible sequence.' onClick={() => this.copySelected(sequenceWrappers)} style={{ position: 'absolute', right: '24px', top: 0 }} />
             </div>
 
             <NonEmptySequenceWrapper>
