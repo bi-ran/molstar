@@ -9,25 +9,34 @@
  */
 
 import * as React from 'react';
-import { Structure } from '../../mol-model/structure/structure/structure';
+import { SymmetryOperator } from '../../mol-math/geometry';
+import { Mat4 } from '../../mol-math/linear-algebra';
+import { QueryContext, Structure, StructureElement, StructureProperties, StructureSelection } from '../../mol-model/structure';
+import { alignAndSuperpose } from '../../mol-model/structure/structure/util/superposition';
 import { getElementQueries, getNonStandardResidueQueries, getPolymerAndBranchedEntityQueries, StructureSelectionQueries, StructureSelectionQuery } from '../../mol-plugin-state/helpers/structure-selection-query';
 import { InteractivityManager } from '../../mol-plugin-state/manager/interactivity';
 import { StructureComponentManager } from '../../mol-plugin-state/manager/structure/component';
 import { StructureComponentRef, StructureRef } from '../../mol-plugin-state/manager/structure/hierarchy-state';
 import { StructureSelectionModifier } from '../../mol-plugin-state/manager/structure/selection';
+import { PluginStateObject } from '../../mol-plugin-state/objects';
+import { StateTransforms } from '../../mol-plugin-state/transforms';
+import { PluginCommands } from '../../mol-plugin/commands';
 import { PluginConfig } from '../../mol-plugin/config';
 import { PluginContext } from '../../mol-plugin/context';
 import { compileIdListSelection } from '../../mol-script/util/id-list';
+import { StateObjectCell, StateObjectRef } from '../../mol-state';
 import { memoizeLatest } from '../../mol-util/memoize';
 import { ParamDefinition } from '../../mol-util/param-definition';
 import { capitalize, stripTags } from '../../mol-util/string';
+import { elementLabel, structureElementStatsLabel } from '../../mol-theme/label';
 import { PluginUIComponent, PurePluginUIComponent } from '../base';
 import { ActionMenu } from '../controls/action-menu';
 import { Button, ControlGroup, IconButton, ToggleButton } from '../controls/common';
-import { BrushSvg, CancelOutlinedSvg, CloseSvg, CubeOutlineSvg, HelpOutlineSvg, Icon, IntersectSvg, RemoveSvg, RestoreSvg, SelectionModeSvg, SetSvg, SubtractSvg, UnionSvg } from '../controls/icons';
+import { BrushSvg, CancelOutlinedSvg, CloseSvg, CubeOutlineSvg, HelpOutlineSvg, Icon, IntersectSvg, RemoveSvg, RestoreSvg, SaveOutlinedSvg, SelectionModeSvg, SetSvg, SubtractSvg, SuperposeChainsSvg, UnionSvg } from '../controls/icons';
 import { ParameterControls, ParamOnChange, PureSelectControl } from '../controls/parameters';
 import { HelpGroup, HelpText, ViewportHelpContent } from '../viewport/help';
 import { AddComponentControls } from './components';
+import { saveCurrentSelection } from './saved-selection';
 
 
 export class ToggleSelectionModeButton extends PurePluginUIComponent<{ inline?: boolean }> {
@@ -62,8 +71,15 @@ interface StructureSelectionActionsControlsState {
 
     action?: StructureSelectionModifier | 'theme' | 'add-component' | 'help',
     helper?: SelectionHelperType,
+    alignBase?: AlignmentEntry,
 
     structureSelectionParams?: typeof StructureSelectionParams,
+}
+
+interface AlignmentEntry {
+    loci: StructureElement.Loci,
+    label: string,
+    cell: StateObjectCell<PluginStateObject.Molecule.Structure>
 }
 
 const ActionHeader = new Map<StructureSelectionModifier, string>([
@@ -77,6 +93,7 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
     state = {
         action: void 0 as StructureSelectionActionsControlsState['action'],
         helper: void 0 as StructureSelectionActionsControlsState['helper'],
+        alignBase: void 0 as AlignmentEntry | undefined,
 
         isEmpty: true,
         isBusy: false,
@@ -235,9 +252,115 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
         this.plugin.managers.structure.component.modifyByCurrentSelection(components, 'subtract');
     };
 
+    saveSelection = () => {
+        saveCurrentSelection(this.plugin);
+    };
+
+    private getRootStructure(s: Structure) {
+        const parent = this.plugin.helpers.substructureParent.get(s)!;
+        return this.plugin.state.data.selectQ(q => q.byValue(parent).rootOfType(PluginStateObject.Molecule.Structure))[0].obj?.data!;
+    }
+
+    private getCurrentAlignmentEntry(): AlignmentEntry | undefined {
+        const location = StructureElement.Location.create();
+        const entries: AlignmentEntry[] = [];
+        let invalid = false;
+
+        this.plugin.managers.structure.selection.entries.forEach(({ selection }, ref) => {
+            if (StructureElement.Loci.isEmpty(selection)) return;
+            const cell = StateObjectRef.resolveAndCheck(this.plugin.state.data, ref);
+            if (!cell) return;
+
+            const l = StructureElement.Loci.getFirstLocation(selection, location);
+            if (!l || selection.elements.length > 1 || StructureProperties.entity.type(l) !== 'polymer') {
+                invalid = true;
+                return;
+            }
+
+            const stats = StructureElement.Stats.ofLoci(selection);
+            const counts = structureElementStatsLabel(stats, { countsOnly: true });
+            const chain = elementLabel(l, { reverse: true, granularity: 'chain' }).split('|');
+            const label = `${counts} | ${chain[0]} | ${chain[chain.length - 1]}`;
+            entries.push({ loci: selection, label, cell });
+        });
+
+        if (invalid) {
+            this.plugin.log.warn('Alignment requires a single polymer chain or residues within one polymer chain.');
+            return;
+        }
+        if (entries.length === 0) {
+            this.plugin.log.warn('Select a polymer chain or residue range before using Align.');
+            return;
+        }
+        if (entries.length > 1) {
+            this.plugin.log.warn('Alignment requires exactly one selected chain or residue range at a time.');
+            return;
+        }
+
+        return entries[0];
+    }
+
+    private async transform(s: StateObjectRef<PluginStateObject.Molecule.Structure>, matrix: Mat4, coordinateSystem?: SymmetryOperator) {
+        const r = StateObjectRef.resolveAndCheck(this.plugin.state.data, s);
+        if (!r) return;
+        const o = this.plugin.state.data.selectQ(q => q.byRef(r.transform.ref).subtree().withTransformer(StateTransforms.Model.TransformStructureConformation))[0];
+
+        const transform = coordinateSystem && !Mat4.isIdentity(coordinateSystem.matrix)
+            ? Mat4.mul(Mat4(), coordinateSystem.matrix, matrix)
+            : matrix;
+
+        const params = {
+            transform: {
+                name: 'matrix' as const,
+                params: { data: transform, transpose: false }
+            }
+        };
+        const b = o
+            ? this.plugin.state.data.build().to(o).update(params)
+            : this.plugin.state.data.build().to(s)
+                .insert(StateTransforms.Model.TransformStructureConformation, params, { tags: 'SelectionModeAlignmentTransform' });
+        await this.plugin.runTask(this.plugin.state.data.updateTree(b));
+    }
+
+    alignSelection = async () => {
+        const entry = this.getCurrentAlignmentEntry();
+        if (!entry) return;
+
+        const base = this.state.alignBase;
+        if (!base) {
+            this.setState({ alignBase: entry });
+            this.plugin.log.info(`Alignment base set to [${stripTags(entry.label)}]. Select a target and press Align again.`);
+            return;
+        }
+
+        if (base.loci.structure.root === entry.loci.structure.root) {
+            this.plugin.log.warn('Alignment target must be from a different structure than the base selection.');
+            return;
+        }
+
+        const { query } = StructureSelectionQueries.trace;
+        const locis = [base, entry].map(e => {
+            const s = StructureElement.Loci.toStructure(e.loci);
+            const loci = StructureSelection.toLociWithSourceUnits(query(new QueryContext(s)));
+            return StructureElement.Loci.remap(loci, this.getRootStructure(e.loci.structure));
+        });
+
+        const pivot = this.plugin.managers.structure.hierarchy.findStructure(locis[0]?.structure);
+        const coordinateSystem = pivot?.transform?.cell.obj?.data.coordinateSystem;
+        const [{ bTransform, rmsd }] = alignAndSuperpose(locis);
+
+        await this.transform(entry.cell, bTransform, coordinateSystem);
+        this.setState({ alignBase: void 0 });
+        this.plugin.log.info(`Aligned [${stripTags(entry.label)}] to [${stripTags(base.label)}] with RMSD ${rmsd.toFixed(2)}.`);
+
+        await new Promise(res => requestAnimationFrame(res));
+        PluginCommands.Camera.Reset(this.plugin);
+    };
+
     render() {
         const granularity = this.plugin.managers.interactivity.props.granularity;
         const hide = this.plugin.spec.components?.selectionTools?.hide;
+        const hasSelection = this.plugin.managers.structure.selection.stats.elementCount > 0;
         const undoTitle = this.state.canUndo
             ? `Undo ${this.plugin.state.data.latestUndoLabel}`
             : 'Some mistakes of the past can be undone.';
@@ -292,6 +415,8 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
                 {(!hide?.theme) && <ToggleButton icon={BrushSvg} title='Apply Theme to Selection' toggle={this.toggleTheme} isSelected={this.state.action === 'theme'} disabled={this.isDisabled} style={{ marginLeft: '10px' }} />}
                 {(!hide?.componentAdd) && <ToggleButton icon={CubeOutlineSvg} title='Create Component of Selection with Representation' toggle={this.toggleAddComponent} isSelected={this.state.action === 'add-component'} disabled={this.isDisabled} />}
                 {(!hide?.componentRemove) && <IconButton svg={RemoveSvg} title='Remove/subtract Selection from all Components' onClick={this.subtract} disabled={this.isDisabled} />}
+                {(!hide?.saveSelection) && <IconButton svg={SaveOutlinedSvg} title='Save current selection' onClick={this.saveSelection} disabled={this.isDisabled || !hasSelection} />}
+                {(!hide?.alignSelection) && <IconButton svg={SuperposeChainsSvg} title={this.state.alignBase ? 'Align current selection to target' : 'Set alignment target to current selection'} onClick={this.alignSelection} disabled={this.isDisabled} toggleState={!!this.state.alignBase} />}
                 {(!hide?.undo) && <IconButton svg={RestoreSvg} onClick={this.undo} disabled={!this.state.canUndo || this.isDisabled} title={undoTitle} />}
 
                 {(!hide?.help) && <ToggleButton icon={HelpOutlineSvg} title='Show/hide help' toggle={this.toggleHelp} style={{ marginLeft: '10px' }} isSelected={this.state.action === 'help'} />}

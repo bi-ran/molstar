@@ -499,7 +499,8 @@
         position: relative;
         // display: inline-block;
         margin: $control-spacing auto 0 auto;
-        width: 430px;
+        width: 560px;
+        max-width: calc(100% - #{2 * $control-spacing});
 
         &-actions {
             position: absolute;
@@ -510,6 +511,22 @@
 
         >.msp-flex-row .msp-btn {
             padding: 0 5px;
+        }
+
+        >.msp-flex-row {
+            column-gap: 1px;
+
+            >select,
+            >button {
+                margin-right: 0;
+            }
+
+            >button.msp-btn {
+                flex: 0 0 32px;
+                min-width: 32px;
+                max-width: 32px;
+                padding: 0;
+            }
         }
 
         select.msp-form-control {

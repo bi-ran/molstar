@@ -27,6 +27,7 @@ import { PluginConfig } from '../mol-plugin/config';
 import { StructureSuperpositionControls } from './structure/superposition';
 import { StructureQuickStylesControls } from './structure/quick-styles';
 import { StructureProceduralAnimationControls } from './structure/procedural-animation';
+import { StructureSavedSelectionsControls } from './structure/saved-selection';
 import { Markdown } from './controls/markdown';
 import { Slider } from './controls/slider';
 import { AnimateStateSnapshotTransition } from '../mol-plugin-state/animation/built-in/state-snapshots';
@@ -334,6 +335,7 @@ export class DefaultStructureTools extends PluginUIComponent {
             <div className='msp-section-header'><Icon svg={BuildSvg} />Structure Tools</div>
 
             <StructureSourceControls />
+            <StructureSavedSelectionsControls />
             <StructureMeasurementsControls />
             <StructureSuperpositionControls />
             <StructureQuickStylesControls />
