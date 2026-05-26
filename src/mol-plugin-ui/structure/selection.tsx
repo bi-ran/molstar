@@ -12,6 +12,7 @@ import * as React from 'react';
 import { SymmetryOperator } from '../../mol-math/geometry';
 import { Mat4 } from '../../mol-math/linear-algebra';
 import { QueryContext, Structure, StructureElement, StructureProperties, StructureSelection } from '../../mol-model/structure';
+import { structureAreIntersecting } from '../../mol-model/structure/query/utils/structure-set';
 import { alignAndSuperpose } from '../../mol-model/structure/structure/util/superposition';
 import { getElementQueries, getNonStandardResidueQueries, getPolymerAndBranchedEntityQueries, StructureSelectionQueries, StructureSelectionQuery } from '../../mol-plugin-state/helpers/structure-selection-query';
 import { InteractivityManager } from '../../mol-plugin-state/manager/interactivity';
@@ -34,7 +35,7 @@ import { elementLabel, structureElementStatsLabel } from '../../mol-theme/label'
 import { PluginUIComponent, PurePluginUIComponent } from '../base';
 import { ActionMenu } from '../controls/action-menu';
 import { Button, ControlGroup, IconButton, ToggleButton } from '../controls/common';
-import { BrushSvg, CancelOutlinedSvg, CloseSvg, CubeOutlineSvg, GetAppSvg, HelpOutlineSvg, Icon, IntersectSvg, RemoveSvg, RestoreSvg, SaveOutlinedSvg, SelectionModeSvg, SetSvg, SubtractSvg, SuperposeChainsSvg, UnionSvg } from '../controls/icons';
+import { BrushSvg, CancelOutlinedSvg, CloseSvg, CubeOutlineSvg, GetAppSvg, HelpOutlineSvg, Icon, IntersectSvg, RestoreSvg, SaveOutlinedSvg, SelectionModeSvg, SetSvg, SubtractSvg, SuperposeChainsSvg, UnionSvg, VisibilityOffOutlinedSvg, VisibilityOutlinedSvg } from '../controls/icons';
 import { ParameterControls, ParamOnChange, PureSelectControl } from '../controls/parameters';
 import { HelpGroup, HelpText, ViewportHelpContent } from '../viewport/help';
 import { AddComponentControls } from './components';
@@ -84,6 +85,12 @@ interface AlignmentEntry {
     cell: StateObjectCell<PluginStateObject.Molecule.Structure>
 }
 
+interface HiddenSelectionTarget {
+    structureRef: string,
+    componentRef: string,
+    selection: Structure
+}
+
 const ActionHeader = new Map<StructureSelectionModifier, string>([
     ['add', 'Add/Union Selection'],
     ['remove', 'Remove/Subtract Selection'],
@@ -92,6 +99,8 @@ const ActionHeader = new Map<StructureSelectionModifier, string>([
 ] as const);
 
 export class StructureSelectionActionsControls extends PluginUIComponent<{}, StructureSelectionActionsControlsState> {
+    private hiddenSelectionTargets: HiddenSelectionTarget[] = [];
+
     state = {
         action: void 0 as StructureSelectionActionsControlsState['action'],
         helper: void 0 as StructureSelectionActionsControlsState['helper'],
@@ -250,12 +259,72 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
         if (task) this.plugin.runTask(task);
     };
 
-    subtract = () => {
+    private getCurrentSelectionTargets() {
+        const sel = this.plugin.managers.structure.hierarchy.getStructuresWithSelection();
+        const targets: { component: StructureComponentRef, target: HiddenSelectionTarget }[] = [];
+        for (const s of sel) {
+            const structure = s.cell.obj?.data;
+            if (!structure) continue;
+
+            const selection = this.plugin.managers.structure.selection.getStructure(structure);
+            if (!selection || selection.elementCount === 0) continue;
+
+            for (const component of s.components) {
+                const componentStructure = component.cell.obj?.data;
+                if (!componentStructure || !structureAreIntersecting(componentStructure, selection)) continue;
+                targets.push({
+                    component,
+                    target: {
+                        structureRef: s.cell.transform.ref,
+                        componentRef: component.cell.transform.ref,
+                        selection
+                    }
+                });
+            }
+        }
+        return targets;
+    }
+
+    private getHiddenSelectionComponents() {
         const sel = this.plugin.managers.structure.hierarchy.getStructuresWithSelection();
         const components: StructureComponentRef[] = [];
-        for (const s of sel) components.push(...s.components);
+        const seen = new Set<string>();
+
+        for (const s of sel) {
+            const structure = s.cell.obj?.data;
+            if (!structure) continue;
+
+            const selection = this.plugin.managers.structure.selection.getStructure(structure);
+            if (!selection || selection.elementCount === 0) continue;
+
+            for (const target of this.hiddenSelectionTargets) {
+                if (target.structureRef !== s.cell.transform.ref) continue;
+                if (!structureAreIntersecting(selection, target.selection)) continue;
+                if (seen.has(target.componentRef)) continue;
+
+                const component = s.components.find(c => c.cell.transform.ref === target.componentRef);
+                if (!component) continue;
+
+                seen.add(target.componentRef);
+                components.push(component);
+            }
+        }
+
+        return components;
+    }
+
+    hideSelection = () => {
+        const targets = this.getCurrentSelectionTargets();
+        const components = targets.map(t => t.component);
         if (components.length === 0) return;
+        this.hiddenSelectionTargets.push(...targets.map(t => t.target));
         this.plugin.managers.structure.component.modifyByCurrentSelection(components, 'subtract');
+    };
+
+    showSelection = () => {
+        const components = this.getHiddenSelectionComponents();
+        if (components.length === 0) return;
+        this.plugin.managers.structure.component.modifyByCurrentSelection(components, 'union');
     };
 
     saveSelection = () => {
@@ -400,7 +469,7 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
                             <HelpText>Use <Icon svg={UnionSvg} inline /> <Icon svg={SubtractSvg} inline /> <Icon svg={IntersectSvg} inline /> <Icon svg={SetSvg} inline /> to modify the selection.</HelpText>
                         </HelpGroup>
                         <HelpGroup header='Representation Operations'>
-                            <HelpText>Use <Icon svg={BrushSvg} inline /> <Icon svg={GetAppSvg} inline /> <Icon svg={CubeOutlineSvg} inline /> <Icon svg={RemoveSvg} inline /> <Icon svg={RestoreSvg} inline /> to color, export, create components, remove from components, or undo actions.</HelpText>
+                            <HelpText>Use <Icon svg={BrushSvg} inline /> <Icon svg={GetAppSvg} inline /> <Icon svg={CubeOutlineSvg} inline /> <Icon svg={VisibilityOffOutlinedSvg} inline /> <Icon svg={VisibilityOutlinedSvg} inline /> <Icon svg={RestoreSvg} inline /> to color, export, create components, hide or show the current selection, or undo actions.</HelpText>
                         </HelpGroup>
                         <ViewportHelpContent selectOnly={true} />
                     </ControlGroup>
@@ -417,16 +486,17 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
 
         return <>
             <div className='msp-flex-row' style={{ background: 'none' }}>
-                {(!hide?.granularity) && <PureSelectControl title={`Picking Level for selecting and highlighting`} param={this.state.structureSelectionParams.granularity} name='granularity' value={granularity} onChange={this.setGranuality} isDisabled={this.isDisabled} />}
+                {(!hide?.granularity) && <PureSelectControl title={`Selection granularity`} param={this.state.structureSelectionParams.granularity} name='granularity' value={granularity} onChange={this.setGranuality} isDisabled={this.isDisabled} />}
                 {(!hide?.union) && <ToggleButton icon={UnionSvg} title={`${ActionHeader.get('add')}. Hold shift key to keep menu open.`} toggle={this.toggleAdd} isSelected={this.state.action === 'add'} disabled={this.isDisabled} />}
                 {(!hide?.subtract) && <ToggleButton icon={SubtractSvg} title={`${ActionHeader.get('remove')}. Hold shift key to keep menu open.`} toggle={this.toggleRemove} isSelected={this.state.action === 'remove'} disabled={this.isDisabled} />}
                 {(!hide?.intersect) && <ToggleButton icon={IntersectSvg} title={`${ActionHeader.get('intersect')}. Hold shift key to keep menu open.`} toggle={this.toggleIntersect} isSelected={this.state.action === 'intersect'} disabled={this.isDisabled} />}
                 {(!hide?.set) && <ToggleButton icon={SetSvg} title={`${ActionHeader.get('set')}. Hold shift key to keep menu open.`} toggle={this.toggleSet} isSelected={this.state.action === 'set'} disabled={this.isDisabled} />}
 
-                {(!hide?.theme) && <ToggleButton icon={BrushSvg} title='Apply Theme to Selection' toggle={this.toggleTheme} isSelected={this.state.action === 'theme'} disabled={this.isDisabled} style={{ marginLeft: '10px' }} />}
+                {(!hide?.theme) && <ToggleButton icon={BrushSvg} title='Apply theme to selection' toggle={this.toggleTheme} isSelected={this.state.action === 'theme'} disabled={this.isDisabled} style={{ marginLeft: '10px' }} />}
                 {(!hide?.exportSelection) && <IconButton svg={GetAppSvg} title='Export current selection' onClick={this.exportSelection} disabled={this.isDisabled || !hasSelection} />}
-                {(!hide?.componentAdd) && <ToggleButton icon={CubeOutlineSvg} title='Create Component of Selection with Representation' toggle={this.toggleAddComponent} isSelected={this.state.action === 'add-component'} disabled={this.isDisabled} />}
-                {(!hide?.componentRemove) && <IconButton svg={RemoveSvg} title='Remove/subtract Selection from all Components' onClick={this.subtract} disabled={this.isDisabled} />}
+                {(!hide?.componentAdd) && <ToggleButton icon={CubeOutlineSvg} title='Create new component from selection' toggle={this.toggleAddComponent} isSelected={this.state.action === 'add-component'} disabled={this.isDisabled} />}
+                {(!hide?.hideSelection) && <IconButton svg={VisibilityOffOutlinedSvg} title='Hide selection' onClick={this.hideSelection} disabled={this.isDisabled} />}
+                {(!hide?.showSelection) && <IconButton svg={VisibilityOutlinedSvg} title='Show selection' onClick={this.showSelection} disabled={this.isDisabled} />}
                 {(!hide?.saveSelection) && <IconButton svg={SaveOutlinedSvg} title='Save current selection' onClick={this.saveSelection} disabled={this.isDisabled || !hasSelection} />}
                 {(!hide?.alignSelection) && <IconButton svg={SuperposeChainsSvg} title={this.state.alignBase ? 'Align current selection to target' : 'Set alignment target to current selection'} onClick={this.alignSelection} disabled={this.isDisabled} toggleState={!!this.state.alignBase} />}
                 {(!hide?.undo) && <IconButton svg={RestoreSvg} onClick={this.undo} disabled={!this.state.canUndo || this.isDisabled} title={undoTitle} />}
