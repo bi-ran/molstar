@@ -20,6 +20,7 @@ import { StructureComponentRef, StructureRef } from '../../mol-plugin-state/mana
 import { StructureSelectionModifier } from '../../mol-plugin-state/manager/structure/selection';
 import { PluginStateObject } from '../../mol-plugin-state/objects';
 import { StateTransforms } from '../../mol-plugin-state/transforms';
+import { exportCurrentSelection } from '../../extensions/model-export/export';
 import { PluginCommands } from '../../mol-plugin/commands';
 import { PluginConfig } from '../../mol-plugin/config';
 import { PluginContext } from '../../mol-plugin/context';
@@ -33,7 +34,7 @@ import { elementLabel, structureElementStatsLabel } from '../../mol-theme/label'
 import { PluginUIComponent, PurePluginUIComponent } from '../base';
 import { ActionMenu } from '../controls/action-menu';
 import { Button, ControlGroup, IconButton, ToggleButton } from '../controls/common';
-import { BrushSvg, CancelOutlinedSvg, CloseSvg, CubeOutlineSvg, HelpOutlineSvg, Icon, IntersectSvg, RemoveSvg, RestoreSvg, SaveOutlinedSvg, SelectionModeSvg, SetSvg, SubtractSvg, SuperposeChainsSvg, UnionSvg } from '../controls/icons';
+import { BrushSvg, CancelOutlinedSvg, CloseSvg, CubeOutlineSvg, GetAppSvg, HelpOutlineSvg, Icon, IntersectSvg, RemoveSvg, RestoreSvg, SaveOutlinedSvg, SelectionModeSvg, SetSvg, SubtractSvg, SuperposeChainsSvg, UnionSvg } from '../controls/icons';
 import { ParameterControls, ParamOnChange, PureSelectControl } from '../controls/parameters';
 import { HelpGroup, HelpText, ViewportHelpContent } from '../viewport/help';
 import { AddComponentControls } from './components';
@@ -119,6 +120,10 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
         });
 
         this.subscribe(this.plugin.managers.interactivity.events.propsUpdated, () => {
+            this.forceUpdate();
+        });
+
+        this.subscribe(this.plugin.managers.structure.selection.events.changed, () => {
             this.forceUpdate();
         });
 
@@ -257,6 +262,10 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
         saveCurrentSelection(this.plugin);
     };
 
+    exportSelection = () => {
+        exportCurrentSelection(this.plugin);
+    };
+
     private getRootStructure(s: Structure) {
         const parent = this.plugin.helpers.substructureParent.get(s)!;
         return this.plugin.state.data.selectQ(q => q.byValue(parent).rootOfType(PluginStateObject.Molecule.Structure))[0].obj?.data!;
@@ -391,7 +400,7 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
                             <HelpText>Use <Icon svg={UnionSvg} inline /> <Icon svg={SubtractSvg} inline /> <Icon svg={IntersectSvg} inline /> <Icon svg={SetSvg} inline /> to modify the selection.</HelpText>
                         </HelpGroup>
                         <HelpGroup header='Representation Operations'>
-                            <HelpText>Use <Icon svg={BrushSvg} inline /> <Icon svg={CubeOutlineSvg} inline /> <Icon svg={RemoveSvg} inline /> <Icon svg={RestoreSvg} inline /> to color, create components, remove from components, or undo actions.</HelpText>
+                            <HelpText>Use <Icon svg={BrushSvg} inline /> <Icon svg={GetAppSvg} inline /> <Icon svg={CubeOutlineSvg} inline /> <Icon svg={RemoveSvg} inline /> <Icon svg={RestoreSvg} inline /> to color, export, create components, remove from components, or undo actions.</HelpText>
                         </HelpGroup>
                         <ViewportHelpContent selectOnly={true} />
                     </ControlGroup>
@@ -415,6 +424,7 @@ export class StructureSelectionActionsControls extends PluginUIComponent<{}, Str
                 {(!hide?.set) && <ToggleButton icon={SetSvg} title={`${ActionHeader.get('set')}. Hold shift key to keep menu open.`} toggle={this.toggleSet} isSelected={this.state.action === 'set'} disabled={this.isDisabled} />}
 
                 {(!hide?.theme) && <ToggleButton icon={BrushSvg} title='Apply Theme to Selection' toggle={this.toggleTheme} isSelected={this.state.action === 'theme'} disabled={this.isDisabled} style={{ marginLeft: '10px' }} />}
+                {(!hide?.exportSelection) && <IconButton svg={GetAppSvg} title='Export current selection' onClick={this.exportSelection} disabled={this.isDisabled || !hasSelection} />}
                 {(!hide?.componentAdd) && <ToggleButton icon={CubeOutlineSvg} title='Create Component of Selection with Representation' toggle={this.toggleAddComponent} isSelected={this.state.action === 'add-component'} disabled={this.isDisabled} />}
                 {(!hide?.componentRemove) && <IconButton svg={RemoveSvg} title='Remove/subtract Selection from all Components' onClick={this.subtract} disabled={this.isDisabled} />}
                 {(!hide?.saveSelection) && <IconButton svg={SaveOutlinedSvg} title='Save current selection' onClick={this.saveSelection} disabled={this.isDisabled || !hasSelection} />}

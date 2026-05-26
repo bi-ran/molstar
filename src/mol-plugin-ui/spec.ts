@@ -43,6 +43,7 @@ export interface PluginUISpec extends PluginSpec {
                 intersect?: boolean,
                 set?: boolean,
                 theme?: boolean,
+                exportSelection?: boolean,
                 componentAdd?: boolean,
                 componentRemove?: boolean,
                 saveSelection?: boolean,

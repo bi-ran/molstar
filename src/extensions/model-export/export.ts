@@ -6,14 +6,18 @@
  */
 
 import { utf8ByteCount, utf8Write } from '../../mol-io/common/utf8';
-import { Structure, to_mmCIF, Unit } from '../../mol-model/structure';
+import { Structure, StructureElement, to_mmCIF, Unit } from '../../mol-model/structure';
 import { PluginContext } from '../../mol-plugin/context';
+import { StateObjectRef } from '../../mol-state';
 import { Task } from '../../mol-task';
 import { getFormattedTime } from '../../mol-util/date';
 import { download } from '../../mol-util/download';
+import { stripTags } from '../../mol-util/string';
 import { zip } from '../../mol-util/zip/zip';
 
 const ModelExportNameProp = '__ModelExportName__';
+const SelectionExportCategoryNames = new Set(['atom_site']);
+
 export const ModelExport = {
     getStructureName(structure: Structure): string | undefined {
         return structure.inheritedPropertyData[ModelExportNameProp];
@@ -29,6 +33,15 @@ export async function exportHierarchy(plugin: PluginContext, options?: { format?
     } catch (e) {
         console.error(e);
         plugin.log.error(`Model export failed. See console for details.`);
+    }
+}
+
+export async function exportCurrentSelection(plugin: PluginContext) {
+    try {
+        await plugin.runTask(_exportCurrentSelection(plugin), { useOverlay: true });
+    } catch (e) {
+        console.error(e);
+        plugin.log.error(`Selection export failed. See console for details.`);
     }
 }
 
@@ -97,4 +110,76 @@ function _exportHierarchy(plugin: PluginContext, options?: { format?: 'cif' | 'b
 
         plugin.log.info(`[Export] Done.`);
     });
+}
+
+function _exportCurrentSelection(plugin: PluginContext) {
+    return Task.create('Export Selection', async ctx => {
+        await ctx.update({ message: 'Exporting current selection...', isIndeterminate: true, canAbort: false });
+
+        const selections: { ref: string, loci: StructureElement.Loci }[] = [];
+        plugin.managers.structure.selection.entries.forEach(({ selection }, ref) => {
+            if (!StructureElement.Loci.isEmpty(selection)) selections.push({ ref, loci: selection });
+        });
+
+        if (selections.length === 0) {
+            plugin.log.warn(`[Export] No current selection to export.`);
+            return;
+        }
+
+        const files: [name: string, data: string][] = [];
+        const entryMap = new Map<string, number>();
+        let elementCount = 0;
+
+        for (const { ref, loci } of selections) {
+            const s = StructureElement.Loci.toStructure(loci);
+            if (s.models.length > 1) {
+                plugin.log.warn(`[Export] Skipping selection from ${getSelectionSourceName(plugin, ref, s)}: Multimodel exports not supported.`);
+                continue;
+            }
+            if (s.units.some(u => !Unit.isAtomic(u))) {
+                plugin.log.warn(`[Export] Skipping selection from ${getSelectionSourceName(plugin, ref, s)}: Non-atomic model exports not supported.`);
+                continue;
+            }
+
+            const name = getUniqueExportName(`${getSelectionSourceName(plugin, ref, s)}_selection`, entryMap);
+            const fileName = `${sanitizeFilename(name)}.cif`;
+
+            await ctx.update({ message: `Exporting ${name}...`, isIndeterminate: true, canAbort: false });
+            files.push([fileName, to_mmCIF(name, s, false, {
+                doNotReindexAtomSiteId: true,
+                includedCategoryNames: SelectionExportCategoryNames
+            }) as string]);
+            elementCount += s.elementCount;
+        }
+
+        if (files.length === 0) {
+            plugin.log.warn(`[Export] No supported atomic selection to export.`);
+            return;
+        }
+
+        if (files.length === 1) {
+            download(new Blob([files[0][1]], { type: 'chemical/x-cif' }), files[0][0]);
+        } else {
+            download(new Blob([files.map(f => f[1]).join('\n')], { type: 'chemical/x-cif' }), `selection_${getFormattedTime()}.cif`);
+        }
+
+        plugin.log.info(`[Export] Exported ${elementCount} selected element${elementCount === 1 ? '' : 's'} to CIF.`);
+    });
+}
+
+function getSelectionSourceName(plugin: PluginContext, ref: string, structure: Structure) {
+    const cell = StateObjectRef.resolveAndCheck(plugin.state.data, ref);
+    const label = cell?.obj?.label || ModelExport.getStructureName(structure) || structure.model.entryId || 'selection';
+    return stripTags(label).trim() || 'selection';
+}
+
+function getUniqueExportName(name: string, entryMap: Map<string, number>) {
+    const base = sanitizeFilename(name);
+    const index = entryMap.get(base) || 0;
+    entryMap.set(base, index + 1);
+    return index === 0 ? base : `${base}_${index + 1}`;
+}
+
+function sanitizeFilename(name: string) {
+    return name.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_.-]/g, '').replace(/_+/g, '_') || 'selection';
 }
