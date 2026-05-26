@@ -135,5 +135,11 @@
             color: color-lower-contrast($font-color, 45%);
             cursor: default;
         }
+
+        .msp-sequence-removed {
+            color: $font-color;
+            text-decoration: line-through;
+            text-decoration-thickness: 2px;
+        }
     }
 }

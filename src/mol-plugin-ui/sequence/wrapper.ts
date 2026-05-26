@@ -66,15 +66,32 @@ abstract class SequenceWrapper<D> {
     isFocused(seqIndex: number): boolean {
         return !!(this.focusMarkerArray[seqIndex]);
     }
+    /** Return true if the position `seqIndex` has been removed from the active structure components */
+    isRemoved(seqIndex: number): boolean {
+        return !!this.removedMarkerArray[seqIndex];
+    }
+
+    setRemovedResidues(removed: Uint8Array): boolean {
+        let changed = false;
+        for (let i = 0, il = this.length; i < il; ++i) {
+            if (this.removedMarkerArray[i] === removed[i]) continue;
+            this.removedMarkerArray[i] = removed[i];
+            changed = true;
+        }
+        return changed;
+    }
 
     /** Markers for "highlighted" and "selected" (2 bits per position) */
     readonly markerArray: Uint8Array;
     /** Markers for "focused" (1 bit per position) */
     readonly focusMarkerArray: Uint8Array;
+    /** Markers for residues removed from structure components (1 bit per position) */
+    readonly removedMarkerArray: Uint8Array;
 
     constructor(readonly data: D, readonly length: number) {
         this.markerArray = new Uint8Array(length);
         this.focusMarkerArray = new Uint8Array(length);
+        this.removedMarkerArray = new Uint8Array(length);
     }
 }
 

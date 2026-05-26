@@ -13,6 +13,7 @@ import { OrderedSet } from '../../mol-data/int';
 import { ColorTypeLocation } from '../../mol-geo/geometry/color-data';
 import { EveryLoci } from '../../mol-model/loci';
 import { StructureElement, StructureProperties, Unit } from '../../mol-model/structure';
+import { PluginStateObject as PSO } from '../../mol-plugin-state/objects';
 import { PluginCommands } from '../../mol-plugin/commands';
 import { PluginContext } from '../../mol-plugin/context';
 import { Representation } from '../../mol-repr/representation';
@@ -91,8 +92,13 @@ export class Sequence<P extends SequenceProps> extends PluginUIComponent<P> {
             this.updateFocus(focus?.loci);
             this.updateMarker();
         });
+        this.subscribe(this.plugin.managers.structure.hierarchy.behaviors.selection, () => {
+            this.updateRemovedResidues();
+            this.updateMarker();
+        });
 
         this.updateColors();
+        this.updateRemovedResidues();
         PluginCommands.Canvas3D.SetSettings.subscribe(this.plugin, () => {
             this.updateColors();
             this.updateMarker();
@@ -122,6 +128,37 @@ export class Sequence<P extends SequenceProps> extends PluginUIComponent<P> {
         if (loci) {
             this.props.sequenceWrapper.markResidue(loci, 'focus');
         }
+    }
+
+    updateRemovedResidues() {
+        const sw = this.props.sequenceWrapper;
+        const removed = new Uint8Array(sw.length);
+        for (let i = 0, il = sw.length; i < il; ++i) {
+            removed[i] = this.isRemovedFromComponents(sw.getLoci(i)) ? 1 : 0;
+        }
+        return sw.setRemovedResidues(removed);
+    }
+
+    private isRemovedFromComponents(loci: StructureElement.Loci) {
+        if (!StructureElement.Loci.is(loci) || StructureElement.Loci.isEmpty(loci)) return false;
+
+        const parent = this.plugin.helpers.substructureParent.get(loci.structure);
+        if (!parent) return false;
+
+        const root = this.plugin.state.data.selectQ(q => q.byValue(parent).rootOfType(PSO.Molecule.Structure))[0];
+        if (!root) return false;
+
+        const structure = this.plugin.managers.structure.hierarchy.current.structures.find(s => s.cell === root);
+        if (!structure) return false;
+        if (structure.components.length === 0) return true;
+
+        for (const c of structure.components) {
+            const component = c.cell.obj?.data;
+            if (!component) continue;
+            const remapped = StructureElement.Loci.remap(loci, component);
+            if (!StructureElement.Loci.isEmpty(remapped)) return false;
+        }
+        return true;
     }
 
     componentWillUnmount() {
@@ -241,6 +278,7 @@ export class Sequence<P extends SequenceProps> extends PluginUIComponent<P> {
         if (seqWrapper.isHighlighted(seqIdx)) classes.push('msp-sequence-residue-highlighted');
         if (seqWrapper.isSelected(seqIdx)) classes.push('msp-sequence-residue-selected');
         if (seqWrapper.isFocused(seqIdx)) classes.push('msp-sequence-residue-focused');
+        if (seqWrapper.isRemoved(seqIdx)) classes.push('msp-sequence-removed');
         return classes.join(' ');
     }
 
@@ -354,6 +392,7 @@ export class Sequence<P extends SequenceProps> extends PluginUIComponent<P> {
         if (this.customColorThemeWrapper) {
             this.customColorFunction = this.customColorThemeWrapper.getColorFunction(sw);
         }
+        this.updateRemovedResidues();
 
         const hasNumbers = !this.props.hideSequenceNumbers, period = this.sequenceNumberPeriod;
         for (let i = 0, il = sw.length; i < il; ++i) {
