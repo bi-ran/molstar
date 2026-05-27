@@ -127,6 +127,11 @@ export class Viewer {
                     left: o.layoutShowLeftPanel ? undefined : 'none',
                 },
                 remoteState: o.layoutShowRemoteState ? 'default' : 'none',
+                sequenceViewer: {
+                    ...defaultSpec.components?.sequenceViewer,
+                    defaultMode: o.sequenceViewerDefaultMode,
+                    modeOptions: o.sequenceViewerModeOptions,
+                },
             },
             config: [
                 [PluginConfig.General.DisableAntialiasing, o.disableAntialiasing],

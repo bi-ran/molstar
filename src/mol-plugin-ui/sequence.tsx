@@ -207,8 +207,13 @@ export function getStructureOptions(state: State) {
     return { options, all };
 }
 
-export type SequenceViewMode = 'single' | 'polymers' | 'all'
-const SequenceViewModeParam = PD.Select<SequenceViewMode>('single', [['single', 'Chain'], ['polymers', 'Polymers'], ['all', 'Everything']]);
+export type SequenceViewMode = 'single' | 'model' | 'all'
+const SequenceViewModeParam = PD.Select<SequenceViewMode>('single', [['single', 'Chain'], ['model', 'Model'], ['all', 'All']]);
+
+type SequenceWrapperEntry = {
+    wrapper: string | SequenceWrapper.Any,
+    label: string
+}
 
 type SequenceViewState = {
     structureOptions: { options: [string, string][], all: Structure[] },
@@ -269,22 +274,20 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
         return (cell.obj as PSO.Molecule.Structure).data;
     }
 
-    private getSequenceWrapper(params: SequenceView['params']) {
+    private getSequenceWrapper(params: SequenceView['params']): SequenceWrapperEntry {
         return {
             wrapper: getSequenceWrapper(this.state, this.plugin.managers.structure.selection),
             label: `${PD.optionLabel(params.chain, this.state.chainGroupId)} | ${PD.optionLabel(params.entity, this.state.modelEntityId)}`
         };
     }
 
-    private getSequenceWrappers(params: SequenceView['params']) {
-        if (this.state.mode === 'single') return [this.getSequenceWrapper(params)];
-
-        const structure = this.getStructure(this.state.structureRef);
-        const wrappers: { wrapper: (string | SequenceWrapper.Any), label: string }[] = [];
-
-        for (const [modelEntityId, eLabel] of getModelEntityOptions(structure, this.state.mode === 'polymers')) {
+    private addSequenceWrappers(wrappers: SequenceWrapperEntry[], structure: Structure, structureLabel?: string) {
+        for (const [modelEntityId, eLabel] of getModelEntityOptions(structure)) {
             for (const [chainGroupId, cLabel] of getChainOptions(structure, modelEntityId)) {
                 for (const [operatorKey] of getOperatorOptions(structure, modelEntityId, chainGroupId)) {
+                    const label = structureLabel
+                        ? `${structureLabel} | ${cLabel} | ${eLabel}`
+                        : `${cLabel} | ${eLabel}`;
                     wrappers.push({
                         wrapper: getSequenceWrapper({
                             structure,
@@ -292,10 +295,35 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
                             chainGroupId,
                             operatorKey
                         }, this.plugin.managers.structure.selection),
-                        label: `${cLabel} | ${eLabel}`
+                        label
                     });
-                    if (wrappers.length > MaxSequenceWrappersCount) return [];
+                    if (wrappers.length > MaxSequenceWrappersCount) return false;
                 }
+            }
+        }
+        return true;
+    }
+
+    private getTooManySequenceWrappers(): SequenceWrapperEntry[] {
+        return [{
+            wrapper: `Too many sequence rows to display. Switch to Chain or Model mode to narrow the view.`,
+            label: ''
+        }];
+    }
+
+    private getSequenceWrappers(params: SequenceView['params']): SequenceWrapperEntry[] {
+        if (this.state.mode === 'single') return [this.getSequenceWrapper(params)];
+
+        const wrappers: SequenceWrapperEntry[] = [];
+        if (this.state.mode === 'model') {
+            const structure = this.getStructure(this.state.structureRef);
+            if (!this.addSequenceWrappers(wrappers, structure)) return this.getTooManySequenceWrappers();
+        } else {
+            const { structureOptions } = this.state;
+            for (let i = 0, il = structureOptions.all.length; i < il; ++i) {
+                const structure = structureOptions.all[i];
+                const structureLabel = structureOptions.options[i]?.[1] || structure.label;
+                if (!this.addSequenceWrappers(wrappers, structure, structureLabel)) return this.getTooManySequenceWrappers();
             }
         }
         return wrappers;
@@ -303,7 +331,9 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
 
     private getInitialState(): SequenceViewState {
         const structureOptions = getStructureOptions(this.plugin.state.data);
-        const structureRef = structureOptions.options[0][0];
+        const hasExistingStructures = this.state.structureOptions.all.length > 0;
+        const canKeepStructure = hasExistingStructures && structureOptions.options.some(([ref]) => ref === this.state.structureRef);
+        const structureRef = canKeepStructure ? this.state.structureRef : structureOptions.options[0][0];
         const structure = this.getStructure(structureRef);
         let modelEntityId = getModelEntityOptions(structure)[0][0];
         let chainGroupId = getChainOptions(structure, modelEntityId)[0][0];
@@ -314,7 +344,8 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
             operatorKey = this.state.operatorKey;
         }
         const defaultMode = this.plugin.spec.components?.sequenceViewer?.defaultMode;
-        const initialMode = this.props.defaultMode ?? defaultMode ?? 'single';
+        const canKeepMode = hasExistingStructures && this.state.sequenceViewModeParam.options.some(([mode]) => mode === this.state.mode);
+        const initialMode = canKeepMode ? this.state.mode : this.props.defaultMode ?? defaultMode ?? 'single';
         return { structureOptions, structure, structureRef, modelEntityId, chainGroupId, operatorKey, mode: initialMode, sequenceViewModeParam: this.state.sequenceViewModeParam };
     }
 
@@ -349,7 +380,7 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
                 state.mode = p.value;
                 if (this.state.mode === state.mode) return;
 
-                if (state.mode === 'all' || state.mode === 'polymers') {
+                if (state.mode === 'model' || state.mode === 'all') {
                     break;
                 }
             case 'structure':
@@ -426,18 +457,19 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
         const params = this.params;
         const values = this.values;
         const sequenceWrappers = this.getSequenceWrappers(params);
+        const showStructureSelect = values.mode !== 'all' && params.structure.options.length > 1;
 
         return <div className='msp-sequence'>
             <div className='msp-sequence-select'>
                 <Icon svg={HelpOutlineSvg} style={{ cursor: 'help', position: 'absolute', right: 0, top: 0 }}
-                    title='This shows a single sequence. Use the controls to show a different sequence. &#10;Use Ctrl or Cmd key to add a sequence range to focus; use Shift key to extend last focused/selected range.' />
+                    title='Shows sequences for one chain, one model, or all loaded structures. &#10;Use Ctrl or Cmd key to add a sequence range to focus; use Shift key to extend last focused/selected range.' />
 
                 <span>Sequence of</span>
-                <PureSelectControl title={`[Structure] ${PD.optionLabel(params.structure, values.structure)}`} param={params.structure} name='structure' value={values.structure} onChange={this.setParamProps} />
                 <PureSelectControl title={`[Mode]`} param={this.state.sequenceViewModeParam} name='mode' value={values.mode} onChange={this.setParamProps} />
+                {showStructureSelect && <PureSelectControl title={`[Structure] ${PD.optionLabel(params.structure, values.structure)}`} param={params.structure} name='structure' value={values.structure} onChange={this.setParamProps} />}
                 {values.mode === 'single' && <PureSelectControl title={`[Entity] ${PD.optionLabel(params.entity, values.entity)}`} param={params.entity} name='entity' value={values.entity} onChange={this.setParamProps} />}
                 {values.mode === 'single' && <PureSelectControl title={`[Chain] ${PD.optionLabel(params.chain, values.chain)}`} param={params.chain} name='chain' value={values.chain} onChange={this.setParamProps} />}
-                {params.operator.options.length > 1 && <>
+                {values.mode === 'single' && params.operator.options.length > 1 && <>
                     <PureSelectControl title={`[Instance] ${PD.optionLabel(params.operator, values.operator)}`} param={params.operator} name='operator' value={values.operator} onChange={this.setParamProps} />
                 </>}
                 <IconButton svg={CopySvg} transparent title='Copy selected residues from the visible sequence.' onClick={() => this.copySelected(sequenceWrappers)} style={{ position: 'absolute', right: '24px', top: 0 }} />
@@ -452,7 +484,7 @@ export class SequenceView extends PluginUIComponent<{ defaultMode?: SequenceView
                     if (values.mode === 'single') return elem;
 
                     return <React.Fragment key={i}>
-                        <div className='msp-sequence-chain-label'>{s.label}</div>
+                        {s.label && <div className='msp-sequence-chain-label'>{s.label}</div>}
                         {elem}
                     </React.Fragment>;
                 })}

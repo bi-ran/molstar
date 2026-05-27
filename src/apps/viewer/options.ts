@@ -11,6 +11,7 @@ import { SaccharideCompIdMapType } from '../../mol-model/structure/structure/car
 import { DataFormatProvider } from '../../mol-plugin-state/formats/provider';
 import { PluginConfig, PluginConfigItem } from '../../mol-plugin/config';
 import { PluginLayoutControlsDisplay } from '../../mol-plugin/layout';
+import type { SequenceViewMode } from '../../mol-plugin-ui/sequence';
 import '../../mol-util/polyfill';
 import { ObjectKeys } from '../../mol-util/type-helpers';
 import { ExtensionMap } from './extensions';
@@ -28,6 +29,8 @@ export const DefaultViewerOptions = {
     layoutShowRemoteState: true,
     layoutControlsDisplay: 'reactive' as PluginLayoutControlsDisplay,
     layoutShowSequence: true,
+    sequenceViewerDefaultMode: 'single' as SequenceViewMode,
+    sequenceViewerModeOptions: void 0 as SequenceViewMode[] | undefined,
     layoutShowLog: true,
     layoutShowLeftPanel: true,
     collapseLeftPanel: false,
