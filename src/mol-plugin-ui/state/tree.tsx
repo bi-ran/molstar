@@ -7,13 +7,14 @@
 import * as React from 'react';
 import { debounceTime, filter } from 'rxjs/operators';
 import { PluginStateObject } from '../../mol-plugin-state/objects';
+import { StateTransforms } from '../../mol-plugin-state/transforms';
 import { PluginCommands } from '../../mol-plugin/commands';
-import { State, StateAction, StateObject, StateObjectCell, StateTransform } from '../../mol-state';
+import { State, StateAction, StateObject, StateObjectCell, StateSelection, StateTransform } from '../../mol-state';
 import { StateTreeSpine } from '../../mol-state/tree/spine';
 import { PluginUIComponent, _Props, _State } from '../base';
 import { ActionMenu } from '../controls/action-menu';
-import { Button, ControlGroup, IconButton } from '../controls/common';
-import { Icon, HomeOutlinedSvg, ArrowRightSvg, ArrowDropDownSvg, DeleteOutlinedSvg, VisibilityOffOutlinedSvg, VisibilityOutlinedSvg, CloseSvg } from '../controls/icons';
+import { Button, ControlGroup, ControlRow, IconButton, TextInput } from '../controls/common';
+import { Icon, HomeOutlinedSvg, ArrowRightSvg, ArrowDropDownSvg, DeleteOutlinedSvg, VisibilityOffOutlinedSvg, VisibilityOutlinedSvg, CloseSvg, CheckSvg, TooltipTextOutlineSvg } from '../controls/icons';
 import { ApplyActionControl } from './apply-action';
 import { UpdateTransformControl } from './update-transform';
 
@@ -142,8 +143,9 @@ class StateTreeNode extends PluginUIComponent<{ cell: StateObjectCell, depth: nu
 interface StateTreeNodeLabelState {
     isCurrent: boolean,
     isCollapsed: boolean,
-    action?: 'options' | 'apply',
-    currentAction?: StateAction
+    action?: 'options' | 'apply' | 'rename',
+    currentAction?: StateAction,
+    renameLabel?: string
 }
 
 class StateTreeNodeLabel extends PluginUIComponent<{ cell: StateObjectCell, depth: number }, StateTreeNodeLabelState> {
@@ -244,6 +246,42 @@ class StateTreeNodeLabel extends PluginUIComponent<{ cell: StateObjectCell, dept
         this.setCurrentRoot();
     };
 
+    get canRename() {
+        return this.props.depth === 0 && PluginStateObject.Molecule.Trajectory.is(this.props.cell.obj);
+    }
+
+    showRename = (e: React.MouseEvent<HTMLElement>) => {
+        if (!this.canRename || !this.props.cell.obj) return;
+
+        e.preventDefault();
+        e.currentTarget.blur();
+        PluginCommands.State.SetCurrentObject(this.plugin, { state: this.props.cell.parent!, ref: this.ref });
+        this.setState({ action: 'rename', currentAction: void 0, renameLabel: this.props.cell.obj.label });
+    };
+
+    updateRenameLabel = (renameLabel: string) => {
+        this.setState({ renameLabel });
+    };
+
+    commitRename = async () => {
+        const cell = this.props.cell;
+        if (!this.canRename || !cell.obj) {
+            this.setState({ action: 'options', renameLabel: void 0 });
+            return;
+        }
+
+        const label = (this.state.renameLabel ?? '').trim();
+        if (label && label !== cell.obj.label) {
+            const decorated = StateSelection.tryFindDecorator(cell.parent!, this.ref, StateTransforms.Model.TrajectoryLabel);
+            if (decorated) {
+                await this.plugin.state.updateTransform(cell.parent!, decorated.transform.ref, { ...decorated.params?.values, label }, 'Rename Object');
+            } else {
+                await cell.parent!.build().to(cell).apply(StateTransforms.Model.TrajectoryLabel, { label }).commit({ canUndo: 'Rename Object' });
+            }
+        }
+        this.setState({ action: 'options', renameLabel: void 0 });
+    };
+
     get actions() {
         const cell = this.props.cell;
         const actions = [...cell.parent!.actions.fromCell(cell, this.plugin)];
@@ -303,6 +341,7 @@ class StateTreeNodeLabel extends PluginUIComponent<{ cell: StateObjectCell, dept
 
         const expand = <IconButton svg={cellState.isCollapsed ? ArrowRightSvg : ArrowDropDownSvg} flex='20px' disabled={disabled} onClick={this.toggleExpanded} transparent className='msp-no-hover-outline' style={{ visibility: children.size > 0 ? 'visible' : 'hidden' }} />;
         const remove = !cell.state.isLocked ? <IconButton svg={DeleteOutlinedSvg} onClick={this.remove} disabled={disabled} small toggleState={false} /> : void 0;
+        const rename = this.canRename ? <IconButton svg={TooltipTextOutlineSvg} onClick={this.showRename} disabled={disabled} small toggleState={this.state.action === 'rename'} title='Rename' /> : void 0;
         const visibility = <IconButton svg={cellState.isHidden ? VisibilityOffOutlinedSvg : VisibilityOutlinedSvg} toggleState={false} disabled={disabled} small onClick={this.toggleVisible} />;
 
         const marginStyle: React.CSSProperties = {
@@ -312,11 +351,24 @@ class StateTreeNodeLabel extends PluginUIComponent<{ cell: StateObjectCell, dept
         const row = <div className={`msp-flex-row msp-tree-row${isCurrent ? ' msp-tree-row-current' : ''}`} onMouseEnter={this.highlight} onMouseLeave={this.clearHighlight} style={marginStyle}>
             {expand}
             {label}
+            {rename}
             {remove}
             {visibility}
         </div>;
 
         if (!isCurrent) return row;
+
+        if (this.state.action === 'rename' && this.canRename && cell.obj) {
+            return <div style={{ marginBottom: '1px' }}>
+                {row}
+                <div className='msp-control-offset' style={{ marginLeft: `${this.props.depth * 8 + 21}px`, marginBottom: '6px' }}>
+                    <ControlRow label='Name' control={<div style={{ display: 'flex', textAlignLast: 'center' }}>
+                        <TextInput onChange={this.updateRenameLabel} onEnter={this.commitRename} value={this.state.renameLabel ?? cell.obj.label} style={{ flex: '1 1 auto', minWidth: 0 }} className='msp-form-control' blurOnEnter={true} blurOnEscape={true} />
+                        <IconButton svg={CheckSvg} onClick={this.commitRename} className='msp-form-control msp-control-button-label' flex />
+                    </div>} />
+                </div>
+            </div>;
+        }
 
         if (this.state.action === 'apply' && this.state.currentAction) {
             return <div style={{ marginBottom: '1px' }}>

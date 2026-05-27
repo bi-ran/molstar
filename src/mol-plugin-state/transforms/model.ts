@@ -78,6 +78,7 @@ export { TrajectoryFromSDF };
 export { TrajectoryFromMOL2 };
 export { TrajectoryFromCube };
 export { TrajectoryFromCifCore };
+export { TrajectoryLabel };
 export { ModelFromTrajectory };
 export { ModelWithCoordinates };
 export { StructureFromTrajectory };
@@ -293,6 +294,39 @@ function trajectoryProps(trajectory: Trajectory) {
     const first = trajectory.representative;
     return { label: `${first.entry}`, description: `${trajectory.frameCount} model${trajectory.frameCount === 1 ? '' : 's'}` };
 }
+
+type TrajectoryLabel = typeof TrajectoryLabel
+const TrajectoryLabel = PluginStateTransform.BuiltIn({
+    name: 'trajectory-label',
+    display: { name: 'Trajectory Label', description: 'Set trajectory display label.' },
+    from: SO.Molecule.Trajectory,
+    to: SO.Molecule.Trajectory,
+    params: {
+        label: PD.Text('', { isHidden: true })
+    },
+    isDecorator: true
+})({
+    apply({ a, params }) {
+        return new SO.Molecule.Trajectory(a.data, { label: params.label || a.label, description: a.description });
+    },
+    update({ a, b, newParams }) {
+        const label = newParams.label || a.label;
+        let updated = false;
+        if (b.data !== a.data) {
+            b.data = a.data;
+            updated = true;
+        }
+        if (b.label !== label) {
+            b.label = label;
+            updated = true;
+        }
+        if (b.description !== a.description) {
+            b.description = a.description;
+            updated = true;
+        }
+        return updated ? StateTransformer.UpdateResult.Updated : StateTransformer.UpdateResult.Unchanged;
+    }
+});
 
 type TrajectoryFromMmCif = typeof TrajectoryFromMmCif
 const TrajectoryFromMmCif = PluginStateTransform.BuiltIn({
